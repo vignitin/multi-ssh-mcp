@@ -1,0 +1,72 @@
+{
+  "ssh_servers": {
+    "production": {
+      "host": "prod.mycompany.com",
+      "port": 22,
+      "username": "admin",
+      "auth_method": "key",
+      "private_key_path": "~/.ssh/id_rsa_prod",
+      "key_passphrase": "${ENV:PROD_KEY_PASSPHRASE}",
+      "description": "Production server",
+      "timeout": 30
+    },
+    "staging": {
+      "host": "staging.mycompany.com",
+      "port": 2222,
+      "username": "deploy",
+      "auth_method": "password",
+      "password": "${ENV:STAGING_PASSWORD}",
+      "description": "Staging environment",
+      "timeout": 30
+    },
+    "database": {
+      "host": "db.internal.com",
+      "port": 22,
+      "username": "dbadmin",
+      "auth_method": "key",
+      "private_key_path": "~/.ssh/id_ed25519",
+      "description": "Database server",
+      "timeout": 45
+    },
+    "web-server-1": {
+      "host": "web1.mycompany.com",
+      "port": 22,
+      "username": "www-data",
+      "auth_method": "key",
+      "private_key_path": "~/.ssh/web_servers_key",
+      "description": "Web server 1"
+    },
+    "web-server-2": {
+      "host": "web2.mycompany.com",
+      "port": 22,
+      "username": "www-data",
+      "auth_method": "key", 
+      "private_key_path": "~/.ssh/web_servers_key",
+      "description": "Web server 2"
+    },
+    "backup-server": {
+      "host": "backup.mycompany.com",
+      "port": 22,
+      "username": "backup",
+      "auth_method": "password",
+      "password": "${ENV:BACKUP_PASSWORD}",
+      "description": "Backup server"
+    },
+    "monitoring": {
+      "host": "monitor.mycompany.com",
+      "port": 22,
+      "username": "monitoring",
+      "auth_method": "key",
+      "private_key_path": "~/.ssh/monitoring_key",
+      "description": "Monitoring server"
+    },
+    "local-vm": {
+      "host": "192.168.1.100",
+      "port": 22,
+      "username": "user",
+      "auth_method": "password",
+      "password": "password123",
+      "description": "Local development VM"
+    }
+  }
+}
