@@ -39,14 +39,7 @@ cp ssh_config_example.json servers.json
 # Edit servers.json with your server details
 ```
 
-### 3. Set Environment Variables
-
-```bash
-export PROD_KEY_PASSPHRASE="your_key_passphrase"
-export STAGING_PASSWORD="your_staging_password"
-```
-
-### 4. Run the MCP Server
+### 3. Run the MCP Server
 
 ```bash
 # Using default config (servers.json)
