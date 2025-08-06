@@ -13,6 +13,7 @@ A Python-based Model Context Protocol (MCP) server that enables Claude to connec
 - **Environment Variables**: Secure credential storage using environment variables
 - **File Transfer**: Upload and download files via SFTP
 - **Command Execution**: Execute commands on any configured server
+- **Structured Output Parsing**: Automatic JSON parsing of command outputs using JC library
 - **Connection Management**: Easy connect/disconnect with status tracking
 - **Security First**: Credentials never stored in configuration files
 
@@ -69,7 +70,7 @@ pip install -r requirements.txt
 
 Or install manually:
 ```bash
-pip install fastmcp>=2.0.0 paramiko>=3.0.0
+pip install fastmcp>=2.0.0 paramiko>=3.0.0 jc>=1.25.0
 ```
 
 ### Development Dependencies
@@ -242,15 +243,20 @@ Disconnects from the current SSH server.
 **Usage:** "Disconnect from the current server"
 
 ### 4. `execute_command`
-Executes a command on the current or specified server.
+Executes a command on the current or specified server with optional output parsing.
 
 **Parameters:**
 - `command`: Command to execute
 - `server_name` (optional): Server to connect to and execute on
+- `parse_output` (optional): Control output parsing
+  - `None` (default): Auto-parse common commands (ls, ps, df, etc.)
+  - `True`: Force parsing if parser available
+  - `False`: Disable parsing, return raw output only
 
 **Usage:** 
 - "Execute 'ls -la' on the current server"
 - "Run 'systemctl status nginx' on the web-server-1"
+- "Execute 'ps aux' with parse_output=True"
 
 ### 5. `upload_file`
 Uploads a file to the current or specified server.
@@ -271,6 +277,27 @@ Downloads a file from the current or specified server.
 - `server_name` (optional): Server to download from
 
 **Usage:** "Download /var/log/app.log from production to ./logs/"
+
+### 7. `get_current_connection`
+Shows information about the current SSH connection.
+
+**Usage:** "What server am I currently connected to?"
+
+## Output Parsing with JC
+
+The MCP server automatically parses command outputs into structured JSON format using the JC library. This makes it easier to analyze and process command results.
+
+### Automatic Parsing
+Common commands like `ls`, `ps`, `df`, `netstat`, `ifconfig`, and many others are automatically parsed when executed.
+
+### Parsing Control
+Use the `parse_output` parameter in `execute_command`:
+- `None` (default): Auto-parse supported commands
+- `True`: Force parsing attempt
+- `False`: Disable parsing, return raw output only
+
+### Example
+When running `df -h`, instead of raw text output, you'll receive structured JSON data with fields like `filesystem`, `size`, `used`, `available`, `use_percent`, and `mount_point`.
 
 ## Usage Examples
 

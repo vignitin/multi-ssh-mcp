@@ -20,6 +20,7 @@ import logging
 
 import paramiko
 from fastmcp import FastMCP
+import jc
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -33,6 +34,7 @@ class SSHServerManager:
         self.servers_config = {}
         self.current_connection = None
         self.current_server = None
+        self.auto_parse_commands = []
         self.load_config()
     
     def load_config(self):
@@ -41,6 +43,13 @@ class SSHServerManager:
             with open(self.config_path, 'r') as f:
                 config = json.load(f)
                 self.servers_config = config.get('ssh_servers', {})
+                # Load auto-parse configuration if present
+                self.auto_parse_commands = config.get('auto_parse_commands', [
+                    'ls', 'ps', 'df', 'netstat', 'ss', 'ifconfig', 'ip', 
+                    'uptime', 'w', 'who', 'mount', 'systemctl', 'service',
+                    'arp', 'route', 'dig', 'ping', 'traceroute', 'iostat',
+                    'vmstat', 'free', 'lsof', 'lsblk', 'lsusb', 'lspci'
+                ])
                 logger.info(f"Loaded {len(self.servers_config)} server configurations")
         except FileNotFoundError:
             logger.error(f"Configuration file not found: {self.config_path}")
@@ -182,8 +191,14 @@ class SSHServerManager:
                 'error': f"Connection error: {str(e)}"
             }
     
-    def execute_command(self, command: str, server_name: str = None) -> Dict[str, Any]:
-        """Execute command on current or specified server"""
+    def execute_command(self, command: str, server_name: str = None, parse_output: bool = None) -> Dict[str, Any]:
+        """Execute command on current or specified server with optional output parsing
+        
+        Args:
+            command: Command to execute
+            server_name: Optional server to connect to
+            parse_output: Whether to parse output (None=auto-detect, True=force, False=disable)
+        """
         # Connect to server if specified and not already connected
         if server_name and server_name != self.current_server:
             connect_result = self.connect(server_name)
@@ -204,7 +219,7 @@ class SSHServerManager:
             stderr_data = stderr.read().decode('utf-8')
             exit_code = stdout.channel.recv_exit_status()
             
-            return {
+            result = {
                 'success': True,
                 'server': self.current_server,
                 'command': command,
@@ -212,6 +227,33 @@ class SSHServerManager:
                 'stdout': stdout_data,
                 'stderr': stderr_data
             }
+            
+            # Determine if we should parse output
+            base_command = command.split()[0].split('/')[-1]
+            should_parse = parse_output
+            
+            # Auto-detect if parse_output is None
+            if parse_output is None:
+                should_parse = base_command in self.auto_parse_commands
+            
+            # Try to parse output with jc if needed
+            if should_parse and stdout_data:
+                try:
+                    # Extract base command (first word, without path)
+                    base_command = command.split()[0].split('/')[-1]
+                    
+                    # Check if jc has a parser for this command
+                    if base_command in jc.parser_mod_list():
+                        parsed_data = jc.parse(base_command, stdout_data)
+                        result['parsed_output'] = parsed_data
+                        result['parser_used'] = base_command
+                    else:
+                        result['parse_note'] = f"No jc parser available for command: {base_command}"
+                except Exception as e:
+                    # If parsing fails, just note it but don't fail the whole command
+                    result['parse_error'] = f"Failed to parse output: {str(e)}"
+            
+            return result
             
         except Exception as e:
             return {
@@ -392,14 +434,15 @@ def main():
             return "No active connection to disconnect"
     
     @mcp.tool()
-    def execute_command(command: str, server_name: str = None) -> str:
+    def execute_command(command: str, server_name: str = None, parse_output: bool = None) -> str:
         """Execute a command on the current or specified SSH server
         
         Args:
             command: Command to execute
             server_name: Optional server to connect to and execute command on
+            parse_output: Whether to parse output (None=auto-detect, True=force, False=disable)
         """
-        result = ssh_manager.execute_command(command, server_name)
+        result = ssh_manager.execute_command(command, server_name, parse_output)
         
         if result['success']:
             output = f"Command executed on {result['server']}: {result['command']}\n"
@@ -410,6 +453,14 @@ def main():
             
             if result['stderr']:
                 output += f"STDERR:\n{result['stderr']}\n"
+            
+            if 'parsed_output' in result:
+                output += f"\nPARSED OUTPUT:\n{json.dumps(result['parsed_output'], indent=2)}\n"
+                output += f"Parser used: {result['parser_used']}\n"
+            elif 'parse_note' in result:
+                output += f"\nPARSING NOTE: {result['parse_note']}\n"
+            elif 'parse_error' in result:
+                output += f"\nPARSING ERROR: {result['parse_error']}\n"
             
             return output
         else:
