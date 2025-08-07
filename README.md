@@ -24,11 +24,12 @@ A Python-based Model Context Protocol (MCP) server that enables Claude to connec
 ```bash
 git clone <repository-url>
 cd multi-ssh-mcp
-pip install -r requirements.txt
 ```
 
-Or using UV (recommended):
+Install dependencies (see [Installation](#installation) section for more options):
 ```bash
+pip install -r requirements.txt
+# or using UV (recommended)
 uv sync
 ```
 
@@ -224,64 +225,43 @@ Add this to your `claude_desktop_config.json`:
 
 ## Available Tools
 
-### 1. `list_servers`
-Lists all configured SSH servers with their details.
+| Tool | Description |
+|------|-------------|
+| **list_servers** | Lists all configured SSH servers with their details |
+| **connect_server** | Connects to a specific SSH server |
+| **disconnect_server** | Disconnects from the current SSH server |
+| **execute_command** | Executes commands with automatic output parsing (JC library) |
+| **upload_file** | Uploads files via SFTP with path validation |
+| **download_file** | Downloads files via SFTP with path validation |
+| **get_current_connection** | Shows current SSH connection status |
+| **ping** | Secure ping with count limits and source interface support |
+| **traceroute** | Traceroute with hop control and automatic parsing |
+| **network_diagnostics** | Run safe network commands (dig, nslookup, netstat, ss, ip) |
 
-**Usage:** "List all available SSH servers"
+### Core SSH Tools
 
-### 2. `connect_server`
-Connects to a specific SSH server.
+- **list_servers**: Show all configured servers
+- **connect_server(server_name)**: Connect to a specific server
+- **disconnect_server**: Close current connection
+- **get_current_connection**: Check connection status
 
-**Parameters:**
-- `server_name`: Name of the server to connect to
+### Command Execution
 
-**Usage:** "Connect to the production server"
+- **execute_command(command, server_name?, parse_output?)**: Run commands with JC parsing
+  - Auto-parses common commands (ls, ps, df, netstat, etc.)
+  - Optional parse_output: None (auto), True (force), False (disable)
 
-### 3. `disconnect_server`
-Disconnects from the current SSH server.
+### File Transfer
 
-**Usage:** "Disconnect from the current server"
+- **upload_file(local_path, remote_path, server_name?)**: SFTP upload
+- **download_file(remote_path, local_path, server_name?)**: SFTP download
 
-### 4. `execute_command`
-Executes a command on the current or specified server with optional output parsing.
+### Network Diagnostics
 
-**Parameters:**
-- `command`: Command to execute
-- `server_name` (optional): Server to connect to and execute on
-- `parse_output` (optional): Control output parsing
-  - `None` (default): Auto-parse common commands (ls, ps, df, etc.)
-  - `True`: Force parsing if parser available
-  - `False`: Disable parsing, return raw output only
-
-**Usage:** 
-- "Execute 'ls -la' on the current server"
-- "Run 'systemctl status nginx' on the web-server-1"
-- "Execute 'ps aux' with parse_output=True"
-
-### 5. `upload_file`
-Uploads a file to the current or specified server.
-
-**Parameters:**
-- `local_path`: Path to local file
-- `remote_path`: Path on remote server
-- `server_name` (optional): Server to upload to
-
-**Usage:** "Upload /local/config.txt to /etc/app/config.txt on staging server"
-
-### 6. `download_file`
-Downloads a file from the current or specified server.
-
-**Parameters:**
-- `remote_path`: Path on remote server
-- `local_path`: Local destination path
-- `server_name` (optional): Server to download from
-
-**Usage:** "Download /var/log/app.log from production to ./logs/"
-
-### 7. `get_current_connection`
-Shows information about the current SSH connection.
-
-**Usage:** "What server am I currently connected to?"
+- **ping(destination, server_name?, count?, source_interface?)**: Test connectivity
+- **traceroute(destination, server_name?, max_hops?, source_interface?)**: Trace network path
+- **network_diagnostics(command_type, destination, server_name?)**: Run network tools
+  - Supported commands: nslookup, dig, netstat, ss, ip
 
 ## Output Parsing with JC
 
@@ -326,11 +306,27 @@ When running `df -h`, instead of raw text output, you'll receive structured JSON
 
 ## Security Considerations
 
+### Built-in Security Features
+- **Command Injection Prevention**: All user inputs are sanitized and validated
+- **Path Validation**: File paths are checked for directory traversal attempts
+- **Command Whitelisting**: Only safe commands are allowed in execute_command
+- **Argument Sanitization**: Special characters and shell metacharacters are filtered
+- **Network Input Validation**: IP addresses and hostnames are validated
+
+### Best Practices
 - Store sensitive credentials in environment variables, not in the JSON config
 - Use SSH keys instead of passwords when possible
 - Limit SSH key permissions and use dedicated keys for automation
 - Keep your configuration file secure (proper file permissions)
 - Consider using SSH agent for key management
+
+### Security Restrictions
+The following are blocked for security:
+- Command chaining (&&, ||, ;)
+- Shell redirections (>, <, |)
+- Command substitution ($(), ``)
+- Environment variable expansion (except for echo $VAR)
+- Directory traversal in file paths (..)
 
 ## Troubleshooting
 

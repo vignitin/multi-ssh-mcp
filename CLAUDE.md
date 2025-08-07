@@ -64,13 +64,21 @@ pytest
 1. `list_servers()` - Lists all configured servers
 2. `connect_server(server_name)` - Connects to specific server
 3. `disconnect_server()` - Disconnects current connection
-4. `execute_command(command, server_name?)` - Runs commands
-5. `upload_file(local_path, remote_path, server_name?)` - SFTP upload
-6. `download_file(remote_path, local_path, server_name?)` - SFTP download
+4. `execute_command(command, server_name?)` - Runs commands with security validation
+5. `upload_file(local_path, remote_path, server_name?)` - SFTP upload with path validation
+6. `download_file(remote_path, local_path, server_name?)` - SFTP download with path validation
 7. `get_current_connection()` - Shows current connection status
+8. `ping(destination, server_name?, count?, source_interface?)` - Secure ping with JC parsing
+9. `traceroute(destination, server_name?, max_hops?, source_interface?)` - Secure traceroute with JC parsing
+10. `network_diagnostics(command_type, destination, server_name?)` - Safe network diagnostic commands
 
 ## Security Model
 
+- **Input Validation**: All user inputs validated and sanitized in `security_utils.py`
+- **Command Injection Prevention**: Shell metacharacters and command chaining blocked
+- **Path Traversal Protection**: File paths validated against directory traversal
+- **Whitelisted Commands**: Only safe commands allowed for execution
+- **Argument Sanitization**: Special characters filtered from command arguments
 - Credentials stored in environment variables (not in config files)
 - SSH key authentication preferred over passwords
 - Auto-accepts host keys (uses `paramiko.AutoAddPolicy()`)

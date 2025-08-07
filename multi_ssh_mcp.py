@@ -22,6 +22,16 @@ import paramiko
 from fastmcp import FastMCP
 import jc
 
+# Import security utilities
+from security_utils import (
+    validate_destination,
+    validate_file_path,
+    validate_interface_name,
+    is_safe_command,
+    sanitize_command_argument,
+    build_safe_command
+)
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ssh-mcp-server")
@@ -199,6 +209,14 @@ class SSHServerManager:
             server_name: Optional server to connect to
             parse_output: Whether to parse output (None=auto-detect, True=force, False=disable)
         """
+        # Security check: validate command safety
+        is_safe, reason = is_safe_command(command)
+        if not is_safe:
+            return {
+                'success': False,
+                'error': f"Command rejected for security reasons: {reason}"
+            }
+        
         # Connect to server if specified and not already connected
         if server_name and server_name != self.current_server:
             connect_result = self.connect(server_name)
@@ -263,6 +281,14 @@ class SSHServerManager:
     
     def upload_file(self, local_path: str, remote_path: str, server_name: str = None) -> Dict[str, Any]:
         """Upload file to current or specified server"""
+        # Validate remote path
+        is_valid, error_msg = validate_file_path(remote_path, allow_relative=False)
+        if not is_valid:
+            return {
+                'success': False,
+                'error': f"Invalid remote path: {error_msg}"
+            }
+        
         # Connect to server if specified and not already connected
         if server_name and server_name != self.current_server:
             connect_result = self.connect(server_name)
@@ -275,6 +301,8 @@ class SSHServerManager:
                 'error': "Not connected to any server. Use connect_server first."
             }
         
+        # Resolve local path to absolute and check existence
+        local_path = os.path.abspath(local_path)
         if not os.path.exists(local_path):
             return {
                 'success': False,
@@ -300,6 +328,14 @@ class SSHServerManager:
     
     def download_file(self, remote_path: str, local_path: str, server_name: str = None) -> Dict[str, Any]:
         """Download file from current or specified server"""
+        # Validate remote path
+        is_valid, error_msg = validate_file_path(remote_path, allow_relative=False)
+        if not is_valid:
+            return {
+                'success': False,
+                'error': f"Invalid remote path: {error_msg}"
+            }
+        
         # Connect to server if specified and not already connected
         if server_name and server_name != self.current_server:
             connect_result = self.connect(server_name)
@@ -506,6 +542,214 @@ def main():
             return f"Currently connected to: {ssh_manager.current_server} ({config['host']}:{config.get('port', 22)})"
         else:
             return "No active SSH connection"
+    
+    @mcp.tool()
+    def ping(destination: str, server_name: str = None, count: int = 5, source_interface: str = None) -> str:
+        """Execute ping command with security validation
+        
+        Args:
+            destination: Target host or IP to ping
+            server_name: Optional server to run ping from
+            count: Number of ping packets (default: 5, max: 10)
+            source_interface: Optional source interface or IP
+        """
+        # Validate destination
+        is_valid, error_msg = validate_destination(destination)
+        if not is_valid:
+            return f"Invalid destination: {error_msg}"
+        
+        # Validate count
+        if not isinstance(count, int) or count < 1 or count > 10:
+            return "Count must be between 1 and 10"
+        
+        # Validate source interface if provided
+        if source_interface and not validate_interface_name(source_interface):
+            return f"Invalid source interface: {source_interface}"
+        
+        # Build safe command
+        args = ["-c", str(count)]
+        if source_interface:
+            args.extend(["-I", source_interface])
+        args.append(destination)
+        
+        ping_command = build_safe_command("ping", args)
+        
+        # Execute command
+        result = ssh_manager.execute_command(ping_command, server_name)
+        
+        if result['success']:
+            output = f"Ping to {destination} from {result.get('server', 'current server')}\n"
+            output += f"Exit code: {result['exit_code']}\n\n"
+            output += result['stdout']
+            
+            # Try to parse with jc if available
+            if result['exit_code'] == 0:
+                try:
+                    parsed = jc.parse('ping', result['stdout'])
+                    if parsed:
+                        output += f"\n\nParsed results:\n"
+                        output += f"- Destination: {parsed.get('destination', 'N/A')}\n"
+                        output += f"- Packets transmitted: {parsed.get('packets_transmitted', 'N/A')}\n"
+                        output += f"- Packets received: {parsed.get('packets_received', 'N/A')}\n"
+                        output += f"- Packet loss: {parsed.get('packet_loss_percent', 'N/A')}%\n"
+                        if 'round_trip_ms_avg' in parsed:
+                            output += f"- Average RTT: {parsed['round_trip_ms_avg']} ms\n"
+                except Exception:
+                    # If parsing fails, just return raw output
+                    pass
+            
+            return output
+        else:
+            return f"Ping failed: {result['error']}"
+    
+    @mcp.tool()
+    def traceroute(destination: str, server_name: str = None, max_hops: int = 30, source_interface: str = None) -> str:
+        """Execute traceroute command with security validation
+        
+        Args:
+            destination: Target host or IP to trace
+            server_name: Optional server to run traceroute from
+            max_hops: Maximum number of hops (default: 30, max: 64)
+            source_interface: Optional source interface or IP
+        """
+        # Validate destination
+        is_valid, error_msg = validate_destination(destination)
+        if not is_valid:
+            return f"Invalid destination: {error_msg}"
+        
+        # Validate max_hops
+        if not isinstance(max_hops, int) or max_hops < 1 or max_hops > 64:
+            return "Max hops must be between 1 and 64"
+        
+        # Validate source interface if provided
+        if source_interface and not validate_interface_name(source_interface):
+            return f"Invalid source interface: {source_interface}"
+        
+        # Build safe command
+        args = ["-m", str(max_hops)]
+        if source_interface:
+            args.extend(["-i", source_interface])
+        args.append(destination)
+        
+        traceroute_command = build_safe_command("traceroute", args)
+        
+        # Execute command
+        result = ssh_manager.execute_command(traceroute_command, server_name)
+        
+        if result['success']:
+            output = f"Traceroute to {destination} from {result.get('server', 'current server')}\n"
+            output += f"Exit code: {result['exit_code']}\n\n"
+            output += result['stdout']
+            
+            # Try to parse with jc if available
+            try:
+                parsed = jc.parse('traceroute', result['stdout'])
+                if parsed and 'hops' in parsed:
+                    output += f"\n\nParsed results:\n"
+                    output += f"- Destination: {parsed.get('destination_name', 'N/A')} ({parsed.get('destination_ip', 'N/A')})\n"
+                    output += f"- Total hops: {len(parsed['hops'])}\n"
+                    
+                    # Show last 3 hops
+                    if parsed['hops']:
+                        output += "- Last few hops:\n"
+                        for hop in parsed['hops'][-3:]:
+                            hop_num = hop.get('hop', '?')
+                            probes = hop.get('probes', [])
+                            if probes and probes[0]:
+                                host = probes[0].get('hostname', probes[0].get('ip', 'Unknown'))
+                                rtt = probes[0].get('rtt', 'N/A')
+                                output += f"  Hop {hop_num}: {host} ({rtt} ms)\n"
+            except Exception:
+                # If parsing fails, just return raw output
+                pass
+            
+            return output
+        else:
+            return f"Traceroute failed: {result['error']}"
+    
+    @mcp.tool() 
+    def network_diagnostics(command_type: str, destination: str, server_name: str = None) -> str:
+        """Run common network diagnostic commands (nslookup, dig, netstat, ss, ip)
+        
+        Args:
+            command_type: Type of command (nslookup, dig, netstat, ss, ip)
+            destination: Arguments for the command (e.g., hostname for nslookup)
+            server_name: Optional server to run command from
+        """
+        # Whitelist of allowed diagnostic commands
+        allowed_commands = {
+            'nslookup': 'nslookup',
+            'dig': 'dig',
+            'netstat': 'netstat',
+            'ss': 'ss',
+            'ip': 'ip'
+        }
+        
+        if command_type not in allowed_commands:
+            return f"Invalid command type. Allowed: {', '.join(allowed_commands.keys())}"
+        
+        base_cmd = allowed_commands[command_type]
+        
+        # Validate and sanitize arguments based on command type
+        if command_type in ['nslookup', 'dig']:
+            # Validate destination for DNS queries
+            is_valid, error_msg = validate_destination(destination)
+            if not is_valid:
+                return f"Invalid destination: {error_msg}"
+            safe_args = [sanitize_command_argument(destination)]
+        elif command_type == 'netstat':
+            # Common netstat options
+            allowed_netstat_args = ['-an', '-rn', '-i', '-s', '-tunlp', '-tulpn']
+            if destination not in allowed_netstat_args:
+                return f"Invalid netstat arguments. Allowed: {', '.join(allowed_netstat_args)}"
+            safe_args = [destination]
+        elif command_type == 'ss':
+            # Common ss options
+            allowed_ss_args = ['-an', '-tn', '-un', '-ln', '-s', '-i', '-tunlp']
+            if destination not in allowed_ss_args:
+                return f"Invalid ss arguments. Allowed: {', '.join(allowed_ss_args)}"
+            safe_args = [destination]
+        elif command_type == 'ip':
+            # Common ip commands
+            allowed_ip_args = ['addr', 'route', 'link', 'neigh']
+            first_arg = destination.split()[0] if destination else ''
+            if first_arg not in allowed_ip_args:
+                return f"Invalid ip subcommand. Allowed: {', '.join(allowed_ip_args)}"
+            safe_args = destination.split()[:2]  # Limit to subcommand and one option
+        
+        # Build command
+        command = build_safe_command(base_cmd, safe_args)
+        
+        # Execute command
+        result = ssh_manager.execute_command(command, server_name)
+        
+        if result['success']:
+            output = f"{command_type} results from {result.get('server', 'current server')}\n"
+            output += f"Command: {command}\n"
+            output += f"Exit code: {result['exit_code']}\n\n"
+            output += result['stdout']
+            
+            # Try to parse with jc if available and applicable
+            if command_type in ['dig', 'netstat', 'ss'] and result['exit_code'] == 0:
+                try:
+                    # Map command type to jc parser name
+                    parser_map = {
+                        'dig': 'dig',
+                        'netstat': 'netstat',
+                        'ss': 'ss'
+                    }
+                    parser_name = parser_map.get(command_type)
+                    if parser_name:
+                        parsed = jc.parse(parser_name, result['stdout'])
+                        if parsed:
+                            output += f"\n\nParsed output available (JSON structure returned)"
+                            # You could format specific fields here based on command type
+                except Exception:
+                    pass
+            
+            return output
+        else:
+            return f"{command_type} failed: {result['error']}"
     
     # Run the FastMCP server
     mcp.run()
