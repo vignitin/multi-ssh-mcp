@@ -240,27 +240,27 @@ Add this to your `claude_desktop_config.json`:
 
 ### Core SSH Tools
 
-- **list_servers**: Show all configured servers
-- **connect_server(server_name)**: Connect to a specific server
-- **disconnect_server**: Close current connection
-- **get_current_connection**: Check connection status
+- `list_servers()`: Show all configured servers
+- `connect_server(server_name)`: Connect to a specific server
+- `disconnect_server()`: Close current connection
+- `get_current_connection()`: Check connection status
 
 ### Command Execution
 
-- **execute_command(command, server_name?, parse_output?)**: Run commands with JC parsing
+- `execute_command(command, server_name=None, parse_output=None)`: Run commands with JC parsing
   - Auto-parses common commands (ls, ps, df, netstat, etc.)
   - Optional parse_output: None (auto), True (force), False (disable)
 
 ### File Transfer
 
-- **upload_file(local_path, remote_path, server_name?)**: SFTP upload
-- **download_file(remote_path, local_path, server_name?)**: SFTP download
+- `upload_file(local_path, remote_path, server_name=None)`: SFTP upload
+- `download_file(remote_path, local_path, server_name=None)`: SFTP download
 
 ### Network Diagnostics
 
-- **ping(destination, server_name?, count?, source_interface?)**: Test connectivity
-- **traceroute(destination, server_name?, max_hops?, source_interface?)**: Trace network path
-- **network_diagnostics(command_type, destination, server_name?)**: Run network tools
+- `ping(destination, server_name=None, count=5, source_interface=None)`: Test connectivity
+- `traceroute(destination, server_name=None, max_hops=30, source_interface=None)`: Trace network path
+- `network_diagnostics(command_type, destination, server_name=None)`: Run network tools
   - Supported commands: nslookup, dig, netstat, ss, ip
 
 ## Output Parsing with JC
