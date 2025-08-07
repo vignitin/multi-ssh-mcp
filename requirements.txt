@@ -1,3 +1,4 @@
 fastmcp>=2.0.0
 paramiko>=3.0.0
 jc>=1.25.0
+uvicorn[standard]>=0.20.0

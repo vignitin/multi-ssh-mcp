@@ -1,0 +1,55 @@
+# Git files
+.git
+.gitignore
+.github
+
+# Python cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info
+.pytest_cache
+.coverage
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Documentation
+*.md
+docs/
+
+# Config files (will be mounted)
+servers.json
+ssh_config_example.json
+config/
+
+# SSH keys (will be mounted)
+*.pem
+*.key
+id_rsa*
+id_dsa*
+id_ecdsa*
+id_ed25519*
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker files (except Dockerfile)
+docker-compose*.yml
+.dockerignore

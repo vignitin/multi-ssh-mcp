@@ -5,6 +5,35 @@
 
 A Python-based Model Context Protocol (MCP) server that enables Claude to connect to and manage multiple SSH servers through a unified interface. Built with FastMCP, it provides secure, on-demand connections with comprehensive server management capabilities.
 
+## Table of Contents
+
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Installation](#installation)
+  - [Docker Installation](#docker-installation-recommended)
+  - [Local Installation](#local-installation)
+- [Configuration](#configuration)
+  - [Server Configuration](#server-configuration)
+  - [Authentication Methods](#authentication-methods)
+  - [Claude Desktop Setup](#claude-desktop-setup)
+  - [Docker Setup](#docker-setup)
+- [Available Tools](#available-tools)
+  - [Core SSH Tools](#core-ssh-tools)
+  - [Command Execution](#command-execution)
+  - [File Transfer](#file-transfer)
+  - [Network Diagnostics](#network-diagnostics)
+- [Output Parsing with JC](#output-parsing-with-jc)
+- [Usage Examples](#usage-examples)
+- [Security Considerations](#security-considerations)
+- [Troubleshooting](#troubleshooting)
+- [Logging](#logging)
+- [Environment Variables](#environment-variables)
+- [SSE/HTTP Mode](#ssehttp-mode)
+  - [Running in SSE Mode](#running-in-sse-mode)
+  - [HTTP Endpoints](#http-endpoints)
+  - [Client Integration](#client-integration)
+- [License](#license)
+
 ## Features
 
 - **Multiple Server Support**: Define unlimited SSH servers in JSON configuration
@@ -16,6 +45,8 @@ A Python-based Model Context Protocol (MCP) server that enables Claude to connec
 - **Structured Output Parsing**: Automatic JSON parsing of command outputs using JC library
 - **Connection Management**: Easy connect/disconnect with status tracking
 - **Security First**: Credentials never stored in configuration files
+- **Multiple Transports**: Supports both stdio (Claude Desktop) and SSE/HTTP modes
+- **Docker Ready**: Full containerization with Docker and Docker Compose support
 
 ## Quick Start
 
@@ -58,11 +89,28 @@ python3 multi_ssh_mcp.py --config my_servers.json
 
 ### System Requirements
 
-- Python 3.10 or higher
+- Python 3.10 or higher (or Docker)
 - SSH access to target servers
 - SSH keys or passwords for authentication
 
-### Dependencies
+### Docker Installation (Recommended)
+
+Using Docker simplifies deployment and ensures consistent environments:
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd multi-ssh-mcp
+
+# Build the Docker image
+./scripts/build.sh
+
+# Copy and configure your servers
+cp ssh_config_example.json config/servers.json
+# Edit config/servers.json with your server details
+```
+
+### Local Installation
 
 Install from requirements.txt:
 ```bash
@@ -223,6 +271,63 @@ Add this to your `claude_desktop_config.json`:
 
 > **Note:** Replace `/path/to/multi-ssh-mcp/` with the actual absolute path to your cloned repository.
 
+### Docker Setup
+
+The Multi-SSH MCP server can be run in Docker containers with support for both stdio (for Claude Desktop) and SSE/HTTP modes.
+
+#### Quick Start with Docker
+
+1. **Build the Docker image:**
+   ```bash
+   ./scripts/build.sh
+   ```
+
+2. **Run in stdio mode (for Claude Desktop):**
+   ```bash
+   ./scripts/run-docker.sh stdio
+   ```
+
+3. **Run in SSE/HTTP mode:**
+   ```bash
+   ./scripts/run-docker.sh sse
+   # Server will be available at http://localhost:8080
+   ```
+
+#### Docker Compose Options
+
+```bash
+# Run in stdio mode
+docker-compose --profile stdio run --rm mcp-ssh-stdio
+
+# Run in SSE/HTTP mode
+docker-compose --profile sse up -d
+
+# Run in development mode with hot reload
+docker-compose --profile dev up
+```
+
+#### Claude Desktop Configuration for Docker
+
+Add this to your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "Multi-SSH MCP (Docker)": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-v", "/path/to/config:/config:ro",
+        "-v", "${HOME}/.ssh:/home/mcp/.ssh:ro",
+        "-e", "SSH_PASSWORD_PROD",
+        "-e", "SSH_PASSWORD_STAGING",
+        "multi-ssh-mcp:latest"
+      ]
+    }
+  }
+}
+```
+
 ## Available Tools
 
 | Tool | Description |
@@ -353,6 +458,112 @@ The server logs connection attempts and errors. To see detailed logs, run with:
 ```bash
 python3 multi_ssh_mcp.py 2>&1 | tee ssh_mcp.log
 ```
+
+## Environment Variables
+
+The MCP server supports the following environment variables:
+
+### Transport Configuration
+- `MCP_TRANSPORT`: Transport mode (`stdio` or `sse`, default: `stdio`)
+- `MCP_HOST`: Host for SSE mode (default: `0.0.0.0`)
+- `MCP_PORT`: Port for SSE mode (default: `8080`)
+- `MCP_CONFIG_PATH`: Path to servers.json file (default: `servers.json`)
+
+### SSH Credentials
+- `SSH_PASSWORD_<SERVER_NAME>`: Password for specific server
+- `SSH_KEY_PASSPHRASE`: Passphrase for SSH keys
+- Any custom variables referenced in your servers.json
+
+### Docker-specific
+- `PYTHONUNBUFFERED`: Set to `1` for immediate log output
+
+## SSE/HTTP Mode
+
+The Multi-SSH MCP server supports Server-Sent Events (SSE) for HTTP-based communication, making it accessible from web applications and HTTP clients.
+
+### Running in SSE Mode
+
+1. **Using Docker:**
+   ```bash
+   ./scripts/run-docker.sh sse
+   # or
+   docker-compose --profile sse up -d
+   ```
+
+2. **Local Python:**
+   ```bash
+   MCP_TRANSPORT=sse MCP_PORT=8080 python multi_ssh_mcp.py
+   ```
+
+### HTTP Endpoints
+
+When running with `MCP_TRANSPORT=sse`, the server provides:
+
+- `GET /sse` - Server-Sent Events stream for real-time MCP messages
+- `POST /messages` - Send commands to the MCP server
+- `GET /health` - Health check endpoint for monitoring
+
+### Client Integration
+
+#### JavaScript/TypeScript Example:
+```javascript
+// Connect to SSE endpoint
+const eventSource = new EventSource('http://localhost:8080/sse');
+
+// Handle incoming messages
+eventSource.onmessage = (event) => {
+    const message = JSON.parse(event.data);
+    console.log('MCP Response:', message);
+};
+
+// Send MCP commands
+async function sendCommand(method, params) {
+    const response = await fetch('http://localhost:8080/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            jsonrpc: '2.0',
+            method: method,
+            params: params,
+            id: Date.now()
+        })
+    });
+    return response.json();
+}
+
+// Example: List servers
+sendCommand('list_servers', {});
+```
+
+#### Python Client Example:
+```python
+import requests
+import sseclient
+
+# Connect to SSE stream
+response = requests.get('http://localhost:8080/sse', stream=True)
+client = sseclient.SSEClient(response)
+
+# Send command
+def send_command(method, params=None):
+    return requests.post('http://localhost:8080/messages', json={
+        'jsonrpc': '2.0',
+        'method': method,
+        'params': params or {},
+        'id': 1
+    }).json()
+
+# Example usage
+servers = send_command('list_servers')
+print(servers)
+```
+
+### Use Cases for SSE Mode
+
+- **Web Applications**: Build web UIs for SSH management
+- **Microservices**: Integrate SSH operations into HTTP-based architectures
+- **Monitoring Systems**: Stream real-time command outputs
+- **API Gateways**: Expose SSH functionality through REST APIs
 
 ## License
 

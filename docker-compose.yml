@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  # MCP SSH Server in stdio mode (for Claude Desktop)
+  mcp-ssh-stdio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: multi-ssh-mcp:latest
+    container_name: mcp-ssh-stdio
+    environment:
+      - MCP_TRANSPORT=stdio
+      - MCP_CONFIG_PATH=/config/servers.json
+      # Pass through SSH-related environment variables
+      - SSH_PASSWORD_PROD=${SSH_PASSWORD_PROD}
+      - SSH_PASSWORD_STAGING=${SSH_PASSWORD_STAGING}
+      - SSH_KEY_PASSPHRASE=${SSH_KEY_PASSPHRASE}
+    volumes:
+      - ./config:/config:ro
+      - ~/.ssh:/home/mcp/.ssh:ro
+    profiles:
+      - stdio
+    stdin_open: true
+    tty: true
+
+  # MCP SSH Server in SSE/HTTP mode
+  mcp-ssh-sse:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: multi-ssh-mcp:latest
+    container_name: mcp-ssh-sse
+    environment:
+      - MCP_TRANSPORT=sse
+      - MCP_CONFIG_PATH=/config/servers.json
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8080
+      # Pass through SSH-related environment variables
+      - SSH_PASSWORD_PROD=${SSH_PASSWORD_PROD}
+      - SSH_PASSWORD_STAGING=${SSH_PASSWORD_STAGING}
+      - SSH_KEY_PASSPHRASE=${SSH_KEY_PASSPHRASE}
+    volumes:
+      - ./config:/config:ro
+      - ~/.ssh:/home/mcp/.ssh:ro
+    ports:
+      - "8080:8080"
+    profiles:
+      - sse
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Development mode with hot reload
+  mcp-ssh-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: multi-ssh-mcp:dev
+    container_name: mcp-ssh-dev
+    environment:
+      - MCP_TRANSPORT=sse
+      - MCP_CONFIG_PATH=/config/servers.json
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8080
+      - PYTHONDONTWRITEBYTECODE=1
+    volumes:
+      - ./config:/config:ro
+      - ~/.ssh:/home/mcp/.ssh:ro
+      - ./multi_ssh_mcp.py:/app/multi_ssh_mcp.py:ro
+      - ./security_utils.py:/app/security_utils.py:ro
+    ports:
+      - "8080:8080"
+    profiles:
+      - dev
+    command: ["--reload"]  # If using uvicorn with reload
+
+networks:
+  default:
+    name: mcp-network

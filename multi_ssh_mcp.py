@@ -751,8 +751,24 @@ def main():
         else:
             return f"{command_type} failed: {result['error']}"
     
-    # Run the FastMCP server
-    mcp.run()
+    # Run the FastMCP server with transport selection
+    transport = os.environ.get("MCP_TRANSPORT", "stdio")
+    
+    if transport == "sse":
+        # Server-Sent Events mode for HTTP streaming
+        import uvicorn
+        from fastmcp.sse import create_sse_transport
+        
+        port = int(os.environ.get("MCP_PORT", "8080"))
+        host = os.environ.get("MCP_HOST", "0.0.0.0")
+        
+        logger.info(f"Starting SSE transport on {host}:{port}")
+        sse_transport = create_sse_transport(mcp, host=host, port=port)
+        uvicorn.run(sse_transport, host=host, port=port, log_level="info")
+    else:
+        # Default stdio transport
+        logger.info("Starting stdio transport")
+        mcp.run()
 
 
 if __name__ == "__main__":
