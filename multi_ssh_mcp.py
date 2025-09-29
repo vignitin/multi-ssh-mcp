@@ -426,6 +426,7 @@ def main():
     # Create FastMCP server
     mcp = FastMCP("Multi-SSH Server")
     
+
     @mcp.tool()
     def list_servers() -> str:
         """List all configured SSH servers with their details"""
@@ -752,19 +753,30 @@ def main():
             return f"{command_type} failed: {result['error']}"
     
     # Run the FastMCP server with transport selection
-    transport = os.environ.get("MCP_TRANSPORT", "stdio")
+    transport = os.environ.get("MCP_TRANSPORT", "stdio").lower()
     
     if transport == "sse":
-        # Server-Sent Events mode for HTTP streaming
+        # Server-Sent Events mode for HTTP streaming (not recommended)
         import uvicorn
-        from fastmcp.sse import create_sse_transport
+        sse_transport = mcp.sse_app()
         
         port = int(os.environ.get("MCP_PORT", "8080"))
         host = os.environ.get("MCP_HOST", "0.0.0.0")
         
         logger.info(f"Starting SSE transport on {host}:{port}")
-        sse_transport = create_sse_transport(mcp, host=host, port=port)
         uvicorn.run(sse_transport, host=host, port=port, log_level="info")
+
+    elif transport == "http":
+        # Streamable HTTP transport (recommended)
+        import uvicorn
+        http_transport = mcp.http_app()
+        
+        port = int(os.environ.get("MCP_PORT", "8080"))
+        host = os.environ.get("MCP_HOST", "0.0.0.0")
+        
+        logger.info(f"Starting Streamable HTTP transport on {host}:{port}")
+        uvicorn.run(http_transport, host=host, port=port, log_level="info")
+
     else:
         # Default stdio transport
         logger.info("Starting stdio transport")
