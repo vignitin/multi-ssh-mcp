@@ -20,6 +20,7 @@ import logging
 
 import paramiko
 from fastmcp import FastMCP
+from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
 import jc
 
 # Import security utilities
@@ -424,7 +425,18 @@ def main():
     logger.info(f"Loaded {len(ssh_manager.servers_config)} server(s): {', '.join(ssh_manager.servers_config.keys())}")
     
     # Create FastMCP server
-    mcp = FastMCP("Multi-SSH Server")
+    bearer_token = os.environ.get("MCP_TOKEN", "stdio")
+    verifier = StaticTokenVerifier(
+        tokens={
+            bearer_token: {
+                "client_id": "helios@juniper.net",
+                "scopes": ["read:data", "write:data", "admin:users"]
+            }
+        },
+        required_scopes=["read:data"]
+    )
+    
+    mcp = FastMCP("Multi-SSH Server", auth=verifier)
     
 
     @mcp.tool()
