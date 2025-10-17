@@ -425,19 +425,22 @@ def main():
     logger.info(f"Loaded {len(ssh_manager.servers_config)} server(s): {', '.join(ssh_manager.servers_config.keys())}")
     
     # Create FastMCP server
-    bearer_token = os.environ.get("MCP_TOKEN", "stdio")
-    verifier = StaticTokenVerifier(
-        tokens={
-            bearer_token: {
-                "client_id": "helios@juniper.net",
-                "scopes": ["read:data", "write:data", "admin:users"]
-            }
-        },
-        required_scopes=["read:data"]
-    )
+    bearer_token = os.environ.get("MCP_TOKEN")
+
+    if bearer_token:
+        verifier = StaticTokenVerifier(
+            tokens={
+                bearer_token: {
+                    "client_id": "superuser",
+                    "scopes": ["read:data", "write:data", "admin:users"]
+                }
+            },
+            required_scopes=["read:data"]
+         )
     
-    mcp = FastMCP("Multi-SSH Server", auth=verifier)
-    
+        mcp = FastMCP("Multi-SSH Server", auth=verifier)
+    else:
+        mcp = FastMCP("Multi-SSH Server")
 
     @mcp.tool()
     def list_servers() -> str:
