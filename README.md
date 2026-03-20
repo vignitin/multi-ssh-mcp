@@ -336,6 +336,8 @@ Add this to your `claude_desktop_config.json`:
 | **connect_server** | Connects to a specific SSH server |
 | **disconnect_server** | Disconnects from the current SSH server |
 | **execute_command** | Executes commands with automatic output parsing (JC library) |
+| **execute_batch_commands** | Executes multiple commands concurrently on one server |
+| **execute_command_on_multiple_servers** | Executes the same command concurrently across multiple servers |
 | **upload_file** | Uploads files via SFTP with path validation |
 | **download_file** | Downloads files via SFTP with path validation |
 | **get_current_connection** | Shows current SSH connection status |
@@ -355,6 +357,12 @@ Add this to your `claude_desktop_config.json`:
 - `execute_command(command, server_name=None, parse_output=None)`: Run commands with JC parsing
   - Auto-parses common commands (ls, ps, df, netstat, etc.)
   - Optional parse_output: None (auto), True (force), False (disable)
+- `execute_batch_commands(server_name, commands, parse_output=None, max_workers=5)`: Run multiple commands in parallel on one server
+  - Uses isolated SSH sessions per command for safe concurrency
+  - Returns per-command success/error, stdout/stderr, exit code, and summary stats
+- `execute_command_on_multiple_servers(command, server_names=None, parse_output=None, max_workers=5)`: Run one command in parallel on many servers
+  - If `server_names` is omitted, runs on all configured servers
+  - Returns per-server success/error, stdout/stderr, exit code, and summary stats
 
 ### File Transfer
 

@@ -17,6 +17,8 @@ import argparse
 from pathlib import Path
 from typing import Any, Dict, Optional, List
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 
 import paramiko
 from fastmcp import FastMCP
@@ -116,66 +118,9 @@ class SSHServerManager:
         config = self.servers_config[server_name]
         
         try:
-            # Create SSH client
-            client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            
-            # Prepare connection parameters
+            client = self._connect_ephemeral(server_name)
             host = config['host']
             port = config.get('port', 22)
-            username = config['username']
-            
-            connect_kwargs = {
-                'hostname': host,
-                'port': port,
-                'username': username,
-                'timeout': config.get('timeout', 30)
-            }
-            
-            # Handle authentication
-            auth_method = config.get('auth_method', 'password')
-            
-            if auth_method == 'password':
-                password = config.get('password')
-                if password and password.startswith('${ENV:'):
-                    # Extract environment variable name
-                    env_var = password[6:-1]  # Remove ${ENV: and }
-                    password = os.getenv(env_var)
-                    if not password:
-                        return {
-                            'success': False,
-                            'error': f"Environment variable {env_var} not set"
-                        }
-                connect_kwargs['password'] = password
-                
-            elif auth_method == 'key':
-                key_path = config.get('private_key_path')
-                if not key_path:
-                    return {
-                        'success': False,
-                        'error': "private_key_path required for key authentication"
-                    }
-                
-                # Expand user path
-                key_path = os.path.expanduser(key_path)
-                if not os.path.exists(key_path):
-                    return {
-                        'success': False,
-                        'error': f"Private key file not found: {key_path}"
-                    }
-                
-                connect_kwargs['key_filename'] = key_path
-                
-                # Handle key passphrase if provided
-                passphrase = config.get('key_passphrase')
-                if passphrase and passphrase.startswith('${ENV:'):
-                    env_var = passphrase[6:-1]
-                    passphrase = os.getenv(env_var)
-                if passphrase:
-                    connect_kwargs['passphrase'] = passphrase
-            
-            # Connect
-            client.connect(**connect_kwargs)
             
             self.current_connection = client
             self.current_server = server_name
@@ -200,6 +145,81 @@ class SSHServerManager:
                 'success': False,
                 'error': f"Connection error: {str(e)}"
             }
+
+    def _build_connect_kwargs(self, server_name: str) -> Dict[str, Any]:
+        """Build validated connection kwargs for a configured server."""
+        if server_name not in self.servers_config:
+            raise ValueError(f"Server '{server_name}' not found in configuration")
+
+        config = self.servers_config[server_name]
+        connect_kwargs = {
+            'hostname': config['host'],
+            'port': config.get('port', 22),
+            'username': config['username'],
+            'timeout': config.get('timeout', 30)
+        }
+
+        auth_method = config.get('auth_method', 'password')
+
+        if auth_method == 'password':
+            password = config.get('password')
+            if password and password.startswith('${ENV:'):
+                env_var = password[6:-1]  # Remove ${ENV: and }
+                password = os.getenv(env_var)
+                if not password:
+                    raise ValueError(f"Environment variable {env_var} not set")
+            connect_kwargs['password'] = password
+        elif auth_method == 'key':
+            key_path = config.get('private_key_path')
+            if not key_path:
+                raise ValueError("private_key_path required for key authentication")
+
+            key_path = os.path.expanduser(key_path)
+            if not os.path.exists(key_path):
+                raise ValueError(f"Private key file not found: {key_path}")
+
+            connect_kwargs['key_filename'] = key_path
+
+            passphrase = config.get('key_passphrase')
+            if passphrase and passphrase.startswith('${ENV:'):
+                env_var = passphrase[6:-1]
+                passphrase = os.getenv(env_var)
+            if passphrase:
+                connect_kwargs['passphrase'] = passphrase
+        else:
+            raise ValueError(f"Unsupported auth_method: {auth_method}")
+
+        return connect_kwargs
+
+    def _connect_ephemeral(self, server_name: str) -> paramiko.SSHClient:
+        """Create and connect a new SSH client for isolated command execution."""
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        connect_kwargs = self._build_connect_kwargs(server_name)
+        client.connect(**connect_kwargs)
+        return client
+
+    def _parse_command_output(self, command: str, stdout_data: str, parse_output: bool = None) -> Dict[str, Any]:
+        """Parse command output using jc when requested or auto-detected."""
+        parsed_details: Dict[str, Any] = {}
+        base_command = command.split()[0].split('/')[-1] if command else ''
+        should_parse = parse_output
+
+        if parse_output is None:
+            should_parse = base_command in self.auto_parse_commands
+
+        if should_parse and stdout_data:
+            try:
+                if base_command in jc.parser_mod_list():
+                    parsed_data = jc.parse(base_command, stdout_data)
+                    parsed_details['parsed_output'] = parsed_data
+                    parsed_details['parser_used'] = base_command
+                else:
+                    parsed_details['parse_note'] = f"No jc parser available for command: {base_command}"
+            except Exception as e:
+                parsed_details['parse_error'] = f"Failed to parse output: {str(e)}"
+
+        return parsed_details
     
     def execute_command(self, command: str, server_name: str = None, parse_output: bool = None) -> Dict[str, Any]:
         """Execute command on current or specified server with optional output parsing
@@ -245,31 +265,7 @@ class SSHServerManager:
                 'stdout': stdout_data,
                 'stderr': stderr_data
             }
-            
-            # Determine if we should parse output
-            base_command = command.split()[0].split('/')[-1]
-            should_parse = parse_output
-            
-            # Auto-detect if parse_output is None
-            if parse_output is None:
-                should_parse = base_command in self.auto_parse_commands
-            
-            # Try to parse output with jc if needed
-            if should_parse and stdout_data:
-                try:
-                    # Extract base command (first word, without path)
-                    base_command = command.split()[0].split('/')[-1]
-                    
-                    # Check if jc has a parser for this command
-                    if base_command in jc.parser_mod_list():
-                        parsed_data = jc.parse(base_command, stdout_data)
-                        result['parsed_output'] = parsed_data
-                        result['parser_used'] = base_command
-                    else:
-                        result['parse_note'] = f"No jc parser available for command: {base_command}"
-                except Exception as e:
-                    # If parsing fails, just note it but don't fail the whole command
-                    result['parse_error'] = f"Failed to parse output: {str(e)}"
+            result.update(self._parse_command_output(command, stdout_data, parse_output))
             
             return result
             
@@ -278,6 +274,153 @@ class SSHServerManager:
                 'success': False,
                 'error': f"Command execution failed: {str(e)}"
             }
+
+    def execute_commands_concurrently_on_server(
+        self,
+        server_name: str,
+        commands: List[str],
+        parse_output: bool = None,
+        max_workers: int = 5
+    ) -> Dict[str, Any]:
+        """Execute multiple commands in parallel on a single server using isolated connections."""
+        if not commands:
+            return {'success': False, 'error': 'commands list cannot be empty'}
+        if server_name not in self.servers_config:
+            return {'success': False, 'error': f"Server '{server_name}' not found in configuration"}
+
+        for cmd in commands:
+            is_safe, reason = is_safe_command(cmd)
+            if not is_safe:
+                return {'success': False, 'error': f"Command rejected for security reasons: {reason}", 'command': cmd}
+
+        workers = max(1, min(max_workers, len(commands), 10))
+        started = time.time()
+        results: List[Dict[str, Any]] = []
+
+        def _run_single(command: str) -> Dict[str, Any]:
+            try:
+                client = self._connect_ephemeral(server_name)
+                try:
+                    stdin, stdout, stderr = client.exec_command(command)
+                    stdout_data = stdout.read().decode('utf-8')
+                    stderr_data = stderr.read().decode('utf-8')
+                    exit_code = stdout.channel.recv_exit_status()
+                    item = {
+                        'success': True,
+                        'server': server_name,
+                        'command': command,
+                        'exit_code': exit_code,
+                        'stdout': stdout_data,
+                        'stderr': stderr_data
+                    }
+                    item.update(self._parse_command_output(command, stdout_data, parse_output))
+                    return item
+                finally:
+                    client.close()
+            except Exception as e:
+                return {
+                    'success': False,
+                    'server': server_name,
+                    'command': command,
+                    'error': f"Command execution failed: {str(e)}"
+                }
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            future_map = {executor.submit(_run_single, cmd): cmd for cmd in commands}
+            for future in as_completed(future_map):
+                results.append(future.result())
+
+        duration_ms = int((time.time() - started) * 1000)
+        succeeded = sum(1 for item in results if item.get('success'))
+        failed = len(results) - succeeded
+
+        return {
+            'success': True,
+            'mode': 'single-server-multi-command',
+            'server': server_name,
+            'summary': {
+                'total': len(results),
+                'succeeded': succeeded,
+                'failed': failed,
+                'duration_ms': duration_ms,
+                'parallel_workers': workers
+            },
+            'results': results
+        }
+
+    def execute_command_concurrently_on_servers(
+        self,
+        command: str,
+        server_names: List[str],
+        parse_output: bool = None,
+        max_workers: int = 5
+    ) -> Dict[str, Any]:
+        """Execute the same command in parallel across multiple servers using isolated connections."""
+        is_safe, reason = is_safe_command(command)
+        if not is_safe:
+            return {'success': False, 'error': f"Command rejected for security reasons: {reason}"}
+
+        if not server_names:
+            server_names = list(self.servers_config.keys())
+
+        missing = [name for name in server_names if name not in self.servers_config]
+        if missing:
+            return {'success': False, 'error': f"Server(s) not found in configuration: {', '.join(missing)}"}
+
+        workers = max(1, min(max_workers, len(server_names), 10))
+        started = time.time()
+        results: List[Dict[str, Any]] = []
+
+        def _run_on_server(server_name: str) -> Dict[str, Any]:
+            try:
+                client = self._connect_ephemeral(server_name)
+                try:
+                    stdin, stdout, stderr = client.exec_command(command)
+                    stdout_data = stdout.read().decode('utf-8')
+                    stderr_data = stderr.read().decode('utf-8')
+                    exit_code = stdout.channel.recv_exit_status()
+                    item = {
+                        'success': True,
+                        'server': server_name,
+                        'command': command,
+                        'exit_code': exit_code,
+                        'stdout': stdout_data,
+                        'stderr': stderr_data
+                    }
+                    item.update(self._parse_command_output(command, stdout_data, parse_output))
+                    return item
+                finally:
+                    client.close()
+            except Exception as e:
+                return {
+                    'success': False,
+                    'server': server_name,
+                    'command': command,
+                    'error': f"Command execution failed: {str(e)}"
+                }
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            future_map = {executor.submit(_run_on_server, name): name for name in server_names}
+            for future in as_completed(future_map):
+                results.append(future.result())
+
+        duration_ms = int((time.time() - started) * 1000)
+        succeeded = sum(1 for item in results if item.get('success'))
+        failed = len(results) - succeeded
+
+        return {
+            'success': True,
+            'mode': 'multi-server-single-command',
+            'command': command,
+            'summary': {
+                'total': len(results),
+                'succeeded': succeeded,
+                'failed': failed,
+                'duration_ms': duration_ms,
+                'parallel_workers': workers
+            },
+            'results': results
+        }
     
     def upload_file(self, local_path: str, remote_path: str, server_name: str = None) -> Dict[str, Any]:
         """Upload file to current or specified server"""
@@ -501,6 +644,70 @@ def main():
             return output
         else:
             return f"Command failed: {result['error']}"
+
+    @mcp.tool()
+    def execute_batch_commands(
+        server_name: str,
+        commands: List[str],
+        parse_output: bool = None,
+        max_workers: int = 5
+    ) -> str:
+        """Execute multiple commands on one server in parallel.
+
+        Args:
+            server_name: Name of the server to run commands on
+            commands: List of commands to execute concurrently
+            parse_output: Whether to parse command output (None=auto-detect)
+            max_workers: Maximum parallel workers (1-10)
+        """
+        if not isinstance(commands, list) or not all(isinstance(cmd, str) for cmd in commands):
+            return "Batch execution failed: commands must be a list of command strings"
+        if not isinstance(max_workers, int) or max_workers < 1 or max_workers > 10:
+            return "Batch execution failed: max_workers must be an integer between 1 and 10"
+
+        result = ssh_manager.execute_commands_concurrently_on_server(
+            server_name=server_name,
+            commands=commands,
+            parse_output=parse_output,
+            max_workers=max_workers
+        )
+
+        if not result.get('success'):
+            return f"Batch execution failed: {result.get('error', 'Unknown error')}"
+
+        return json.dumps(result, indent=2)
+
+    @mcp.tool()
+    def execute_command_on_multiple_servers(
+        command: str,
+        server_names: List[str] = None,
+        parse_output: bool = None,
+        max_workers: int = 5
+    ) -> str:
+        """Execute the same command on multiple servers in parallel.
+
+        Args:
+            command: Command to execute on each target server
+            server_names: Optional list of server names; defaults to all configured servers
+            parse_output: Whether to parse command output (None=auto-detect)
+            max_workers: Maximum parallel workers (1-10)
+        """
+        if server_names is not None and (not isinstance(server_names, list) or not all(isinstance(name, str) for name in server_names)):
+            return "Multi-server execution failed: server_names must be a list of server name strings"
+        if not isinstance(max_workers, int) or max_workers < 1 or max_workers > 10:
+            return "Multi-server execution failed: max_workers must be an integer between 1 and 10"
+
+        result = ssh_manager.execute_command_concurrently_on_servers(
+            command=command,
+            server_names=server_names or [],
+            parse_output=parse_output,
+            max_workers=max_workers
+        )
+
+        if not result.get('success'):
+            return f"Multi-server execution failed: {result.get('error', 'Unknown error')}"
+
+        return json.dumps(result, indent=2)
     
     @mcp.tool()
     def upload_file(local_path: str, remote_path: str, server_name: str = None) -> str:
@@ -755,16 +962,24 @@ def main():
     transport = os.environ.get("MCP_TRANSPORT", "stdio")
     
     if transport == "sse":
-        # Server-Sent Events mode for HTTP streaming
+        # Server-Sent Events mode for HTTP streaming (deprecated, use streamable-http)
         import uvicorn
         from fastmcp.sse import create_sse_transport
         
-        port = int(os.environ.get("MCP_PORT", "8080"))
+        port = int(os.environ.get("MCP_PORT", "8888"))
         host = os.environ.get("MCP_HOST", "0.0.0.0")
         
         logger.info(f"Starting SSE transport on {host}:{port}")
         sse_transport = create_sse_transport(mcp, host=host, port=port)
         uvicorn.run(sse_transport, host=host, port=port, log_level="info")
+    elif transport == "streamable-http":
+        # New Streamable HTTP transport - recommended for production
+        port = int(os.environ.get("MCP_PORT", "8888"))
+        host = os.environ.get("MCP_HOST", "0.0.0.0")
+        
+        logger.info(f"Starting Streamable HTTP transport on {host}:{port}")
+        # FastMCP v2.0 supports streamable HTTP via run() method
+        mcp.run(transport="http", host=host, port=port)
     else:
         # Default stdio transport
         logger.info("Starting stdio transport")
