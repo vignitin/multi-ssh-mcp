@@ -52,18 +52,19 @@ USER mcp
 ENV MCP_TRANSPORT=stdio \
     MCP_CONFIG_PATH=/config/servers.json \
     MCP_HOST=0.0.0.0 \
-    MCP_PORT=8080 \
+    MCP_PORT=8888 \
     PYTHONUNBUFFERED=1
 
 # Volume for configuration and SSH keys
 VOLUME ["/config", "/home/mcp/.ssh"]
 
-# Expose port for SSE mode
-EXPOSE 8080
+# Expose port for SSE/Streamable HTTP mode
+EXPOSE 8888
 
 # Health check for container monitoring
+# Works for both SSE and Streamable HTTP transports
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import socket; s = socket.socket(); s.connect(('localhost', 8080))" || exit 1
+    CMD python -c "import socket; s = socket.socket(); s.connect(('localhost', 8888))" || exit 1
 
 # Default command
 ENTRYPOINT ["python", "multi_ssh_mcp.py"]

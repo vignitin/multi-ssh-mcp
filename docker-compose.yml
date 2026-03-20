@@ -23,7 +23,7 @@ services:
     stdin_open: true
     tty: true
 
-  # MCP SSH Server in SSE/HTTP mode
+  # MCP SSH Server in SSE/HTTP mode (deprecated - use streamable-http)
   mcp-ssh-sse:
     build:
       context: .
@@ -34,7 +34,7 @@ services:
       - MCP_TRANSPORT=sse
       - MCP_CONFIG_PATH=/config/servers.json
       - MCP_HOST=0.0.0.0
-      - MCP_PORT=8080
+      - MCP_PORT=8888
       # Pass through SSH-related environment variables
       - SSH_PASSWORD_PROD=${SSH_PASSWORD_PROD}
       - SSH_PASSWORD_STAGING=${SSH_PASSWORD_STAGING}
@@ -43,12 +43,43 @@ services:
       - ./config:/config:ro
       - ~/.ssh:/home/mcp/.ssh:ro
     ports:
-      - "8080:8080"
+      - "8888:8888"
     profiles:
       - sse
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8888/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # MCP SSH Server in Streamable HTTP mode (recommended)
+  mcp-ssh-streamable-http:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: multi-ssh-mcp:latest
+    container_name: mcp-ssh-streamable-http
+    environment:
+      - MCP_TRANSPORT=streamable-http
+      - MCP_CONFIG_PATH=/config/servers.json
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8888
+      # Pass through SSH-related environment variables
+      - SSH_PASSWORD_PROD=${SSH_PASSWORD_PROD}
+      - SSH_PASSWORD_STAGING=${SSH_PASSWORD_STAGING}
+      - SSH_KEY_PASSPHRASE=${SSH_KEY_PASSPHRASE}
+    volumes:
+      - ./config:/config:ro
+      - ~/.ssh:/home/mcp/.ssh:ro
+    ports:
+      - "8888:8888"
+    profiles:
+      - streamable-http
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8888/mcp')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -65,7 +96,7 @@ services:
       - MCP_TRANSPORT=sse
       - MCP_CONFIG_PATH=/config/servers.json
       - MCP_HOST=0.0.0.0
-      - MCP_PORT=8080
+      - MCP_PORT=8888
       - PYTHONDONTWRITEBYTECODE=1
     volumes:
       - ./config:/config:ro
@@ -73,7 +104,7 @@ services:
       - ./multi_ssh_mcp.py:/app/multi_ssh_mcp.py:ro
       - ./security_utils.py:/app/security_utils.py:ro
     ports:
-      - "8080:8080"
+      - "8888:8888"
     profiles:
       - dev
     command: ["--reload"]  # If using uvicorn with reload
